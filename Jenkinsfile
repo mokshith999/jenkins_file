@@ -1,22 +1,65 @@
 pipeline {
     agent any
 
+    tools {
+        jdk 'jdk17'   // Use the JDK 17 you installed in Jenkins
+    }
+
+    triggers {
+        githubPush()
+    }
+
+    environment {
+        SONAR_SCANNER = tool 'sonar-scanner'
+    }
+
     stages {
-        stage('build') {
+
+        stage('Validate Branch') {
+            when {
+                expression { return env.GIT_BRANCH ==~ /.*name\.developer.*/ }
+            }
             steps {
-                sh 'echo this is build stage'
+                echo "Branch matches name.developer — proceeding"
             }
         }
 
-        stage('deploy') {
+        stage('Checkout') {
             steps {
-                sh 'echo this is deploy stage'
+                checkout scm
             }
         }
 
-        stage('test') {
+        stage('SonarQube Analysis') {
             steps {
-                sh 'echo this is test stage'
+                withSonarQubeEnv('sonarqube') {
+                    sh """
+                        ${SONAR_SCANNER}/bin/sonar-scanner \
+                        -Dsonar.projectKey=jenkins \
+                        -Dsonar.sources=.
+                    """
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                echo "Quality Gate passed — building application"
+                sh "cd sample-app && mvn clean package"
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts artifacts: 'sample-app/target/*.war', fingerprint: true
             }
         }
     }
